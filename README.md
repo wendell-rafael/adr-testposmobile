@@ -1,1 +1,89 @@
-# adr-testposmobile
+# ADR 0001: Criptografia de Autenticação Offline Segura
+
+**Proprietário da Implementação:** @wendell-rafael
+
+**Data de Início:** 10/08/2024  
+
+**Data-Alvo:** 25/08/2025  
+
+**Issue Interno:** TESTPOSMOBILE24-103
+
+## Sumário
+Para aprimorar a segurança do login offline no Testpos Mobile, avaliamos duas abordagens para proteger as senhas de usuário armazenadas localmente:
+
+- **Proposta A (escolhida):** aproveitar mecanismos nativos de plataforma (Android Keystore + EncryptedSharedPreferences; iOS Keychain + Secure Enclave).  
+- **Proposta B (rejeitada):** embutir uma chave fixa concatenada à senha antes de persistir em SQLite.  
+
+Optamos pela Proposta A por sua maior robustez e segurança, evitando a exposição de uma chave fixa a engenharia reversa.
+
+---
+
+## 1. Contexto e Declaração do Problema
+
+Em aplicativos móveis, usuários frequentemente optam por "lembrar" suas credenciais para login offline. No entanto, armazenar senhas em texto puro ou em banco local sem criptografia expõe essas credenciais caso o dispositivo seja comprometido (roubo, root/jailbreak, malware).
+
+> **No contexto** de habilitar o login offline no Testpos Mobile,  
+> **diante do risco** de credenciais em texto puro em um dispositivo comprometido,  
+> **decidimos** empregar criptografia nativa de plataforma com suporte a hardware,  
+> e **descartamos** chaves fixas ad-hoc,  
+> **para alcançar** forte confidencialidade e integridade,  
+> **aceitando** o compromisso de requisitos mínimos de API e complexidade de fallback.
+
+
+---
+
+## 2. Direcionadores da Decisão
+
+- **Segurança:** proteger as credenciais mesmo com acesso ao armazenamento local.  
+- **Suporte cross-platform:** solução deve funcionar em Android e iOS.  
+- **Leveza:** evitar bibliotecas de terceiros pesadas.  
+- **Manutenibilidade:** suportar migrações de esquema e caminhos de fallback.
+
+---
+
+## 3. Proposta de Design
+
+### Proposta A (escolhida)
+
+#### Android
+1. Gerar chave mestra AES com suporte a hardware via Android Keystore (API ≥ 23).  
+2. Usar EncryptedSharedPreferences (Jetpack Security) para criptografar/descriptografar a senha.  
+3. Opcional: derivar chaves via PBKDF2 com salt aleatório e alta contagem de iterações, caso haja PIN/passphrase.
+
+#### iOS
+1. Armazenar credenciais no Keychain Services (idealmente Secure Enclave) com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.  
+2. Usar AES/GCM para criptografia e autenticação.  
+3. Opcional: derivar chaves via HKDF com salt seguro e parâmetros apropriados.
+
+### Proposta B (rejeitada)
+
+- **Chave fixa + senha:** embutir uma chave fixa no binário e concatená-la à senha antes de armazenar em SQLite.  
+- **Motivo da rejeição:** a chave fixa seria extraível via engenharia reversa, tornando a criptografia ineficaz.
+
+---
+
+## 4. Alternativas Consideradas
+
+| Alternativa                          | Prós                             | Contras                                                    | Decisão              |
+|--------------------------------------|----------------------------------|------------------------------------------------------------|----------------------|
+| Armazenamento em texto puro          | Implementação trivial            | Comprometimento imediato se o armazenamento for lido       | Rejeitado            |
+| SQLCipher (SQLite criptografado)     | Criptografia de banco completo   | Complexidade, aumenta tamanho do app, migrações custom     | Não priorizado       |
+| Bibliotecas de cofre cross-platform  | Abstração unificada Android/iOS   | Dependência de terceiros, overhead de integração           | Considerado, mas inferior |
+
+---
+
+## 5. Consequências
+
+- **Segurança aprimorada:** credenciais acessíveis apenas via APIs com suporte a hardware.  
+- **Dependência de API:** requer Android API ≥ 23 e dispositivos iOS com Secure Enclave; necessário fallback para versões antigas.  
+-  **Risco de perda de dados:** redefinir PIN/biometria ou limpar o Keystore/Enclave invalida a chave mestra, forçando novo login.
+
+---
+
+## 6. Referências
+
+- Jetpack Security – EncryptedSharedPreferences  
+- Apple Keychain Services  
+- ISO/IEC/IEEE 42010 – Architectural Description  
+- João Arthur Brunet, “O Modelo de RFC para documentação arquitetural”, 12 de junho de 2025
+
